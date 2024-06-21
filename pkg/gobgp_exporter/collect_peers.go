@@ -28,7 +28,7 @@ import (
 // GetPeers collects information about BGP peers.
 func (n *RouterNode) GetPeers() {
 
-	serverResponse, err := n.client.ListPeer(context.Background(), &gobgpapi.ListPeerRequest{})
+	serverResponse, err := n.client.ListPeer(context.Background(), &gobgpapi.ListPeerRequest{EnableAdvertised: true})
 	if err != nil {
 		level.Error(n.logger).Log(
 			"msg", "GoBGP query for peers failed",
