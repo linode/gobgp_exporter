@@ -15,10 +15,26 @@
 package exporter
 
 import (
+	"fmt"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/common/promlog"
+	"github.com/sirupsen/logrus"
 )
+
+func getPackageRootPath() (string, error) {
+	_, filename, _, ok := runtime.Caller(1)
+	if !ok {
+		return "", fmt.Errorf("failed to get caller information")
+	}
+
+	return filepath.Base(filename), nil
+}
+
+var Logger = logrus.New()
 
 func TestNewExporter(t *testing.T) {
 	allowedLogLevel := &promlog.AllowedLevel{}
@@ -26,11 +42,20 @@ func TestNewExporter(t *testing.T) {
 		t.Fatalf("%s", err)
 	}
 
-	promlogConfig := &promlog.Config{
-		Level: allowedLogLevel,
+	rootPath, _ := getPackageRootPath()
+	if !strings.HasSuffix(rootPath, "/") {
+		rootPath += "/"
 	}
 
-	logger := promlog.New(promlogConfig)
+	Logger.SetReportCaller(true)
+	Logger.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05",
+		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
+			source := fmt.Sprintf(" source: %s:%d", strings.TrimPrefix(f.File, rootPath), f.Line)
+			return "//", source
+		},
+	})
 
 	cases := []struct {
 		address string
@@ -51,7 +76,7 @@ func TestNewExporter(t *testing.T) {
 		opts := Options{
 			Timeout: pollTimeout,
 			Address: test.address,
-			Logger:  logger,
+			Logger:  Logger,
 		}
 		_, err := NewExporter(opts)
 		if test.ok && err != nil {

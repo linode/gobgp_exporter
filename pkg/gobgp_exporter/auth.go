@@ -17,8 +17,6 @@ package exporter
 import (
 	"fmt"
 	"net/http"
-
-	"github.com/go-kit/log/level"
 )
 
 // AddAuthenticationToken adds an authentication token for accessing
@@ -58,15 +56,9 @@ func (e *Exporter) authorize(r *http.Request) (string, bool) {
 	}
 
 	if invalidToken {
-		level.Warn(e.logger).Log(
-			"reason", "unauthorized access with invalid token",
-			"remote_address", r.RemoteAddr,
-		)
+		e.logger.Warnf("reason: unauthorized access with invalid token. remote_address: %s", r.RemoteAddr)
 	} else {
-		level.Warn(e.logger).Log(
-			"reason", "unauthorized access without auth token",
-			"remote_address", r.RemoteAddr,
-		)
+		e.logger.Warnf("reason: unauthorized access without auth token. remote_address: %s", r.RemoteAddr)
 	}
 
 	return "", false
