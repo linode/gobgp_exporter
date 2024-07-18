@@ -18,21 +18,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/prometheus/common/promlog"
 	"github.com/sirupsen/logrus"
 )
-
-func getPackageRootPath() (string, error) {
-	_, filename, _, ok := runtime.Caller(1)
-	if !ok {
-		return "", fmt.Errorf("failed to get caller information")
-	}
-
-	return filepath.Base(filename), nil
-}
 
 var Logger = logrus.New()
 
@@ -42,17 +32,12 @@ func TestNewExporter(t *testing.T) {
 		t.Fatalf("%s", err)
 	}
 
-	rootPath, _ := getPackageRootPath()
-	if !strings.HasSuffix(rootPath, "/") {
-		rootPath += "/"
-	}
-
 	Logger.SetReportCaller(true)
 	Logger.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp:   true,
 		TimestampFormat: "2006-01-02 15:04:05",
 		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
-			source := fmt.Sprintf(" source: %s:%d", strings.TrimPrefix(f.File, rootPath), f.Line)
+			source := fmt.Sprintf(" source: %s:%d", filepath.Base(f.File), f.Line)
 			return "//", source
 		},
 	})

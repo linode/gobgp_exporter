@@ -163,7 +163,7 @@ func main() {
 		FullTimestamp:   true,
 		TimestampFormat: "2006-01-02 15:04:05",
 		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
-			source := fmt.Sprintf(" source: %s:%d", strings.TrimPrefix(f.File, rootPath), f.Line)
+			source := fmt.Sprintf(" source: %s:%d", filepath.Base(f.File), f.Line)
 			return "//", source
 		},
 	})
