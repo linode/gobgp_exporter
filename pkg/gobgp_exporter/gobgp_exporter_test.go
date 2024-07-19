@@ -20,17 +20,12 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/prometheus/common/promlog"
 	"github.com/sirupsen/logrus"
 )
 
 var Logger = logrus.New()
 
 func TestNewExporter(t *testing.T) {
-	allowedLogLevel := &promlog.AllowedLevel{}
-	if err := allowedLogLevel.Set("debug"); err != nil {
-		t.Fatalf("%s", err)
-	}
 
 	Logger.SetReportCaller(true)
 	Logger.SetFormatter(&logrus.TextFormatter{

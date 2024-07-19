@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	exporter "github.com/greenpau/gobgp_exporter/pkg/gobgp_exporter"
-	"github.com/prometheus/common/promlog"
 	"github.com/sirupsen/logrus"
 )
 
@@ -175,12 +174,6 @@ func main() {
 		Logger.SetLevel(logrus.InfoLevel)
 	default:
 		Logger.SetLevel(logrus.InfoLevel)
-	}
-
-	allowedLogLevel := &promlog.AllowedLevel{}
-	if err := allowedLogLevel.Set(logLevel); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-		os.Exit(1)
 	}
 
 	opts.Logger = Logger
