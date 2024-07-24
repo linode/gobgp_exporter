@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-kit/log/level"
 	gobgpapi "github.com/osrg/gobgp/v3/api"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/net/context"
@@ -30,9 +29,7 @@ func (n *RouterNode) GatherMetrics() {
 	n.Lock()
 	defer n.Unlock()
 
-	level.Debug(n.logger).Log(
-		"msg", "GatherMetrics() locked",
-	)
+	n.logger.Debug("msg: GatherMetrics() locked")
 
 	if time.Now().Unix() < n.nextCollectionTicker {
 		return
@@ -40,9 +37,7 @@ func (n *RouterNode) GatherMetrics() {
 	start := time.Now()
 	if len(n.metrics) > 0 {
 		n.metrics = n.metrics[:0]
-		level.Debug(n.logger).Log(
-			"msg", "GatherMetrics() cleared metrics",
-		)
+		n.logger.Debug("msg: GatherMetrics() cleared metrics")
 	}
 	upValue := 1
 
@@ -50,10 +45,7 @@ func (n *RouterNode) GatherMetrics() {
 	server, err := n.client.GetBgp(context.Background(), &gobgpapi.GetBgpRequest{})
 	if err != nil {
 		n.IncrementErrorCounter()
-		level.Error(n.logger).Log(
-			"msg", "failed query gobgp server",
-			"error", err.Error(),
-		)
+		n.logger.Log(n.logger.GetLevel(), "Failed query gobgp server. Error: ", err.Error())
 		if IsConnectionError(err) {
 			n.connected = false
 			upValue = 0
@@ -61,11 +53,7 @@ func (n *RouterNode) GatherMetrics() {
 	} else {
 		n.routerID = server.Global.RouterId
 		n.localAS = server.Global.Asn
-		level.Debug(n.logger).Log(
-			"msg", "router info",
-			"router_id", n.routerID,
-			"local_asn", n.localAS,
-		)
+		n.logger.Debugf("msg: router info. router_id: %s. local_ans: %d", n.routerID, n.localAS)
 		n.connected = true
 	}
 
@@ -133,7 +121,5 @@ func (n *RouterNode) GatherMetrics() {
 	}
 	n.timestamp = time.Now().Format(time.RFC3339)
 
-	level.Debug(n.logger).Log(
-		"msg", "GatherMetrics() returns",
-	)
+	n.logger.Debug("msg: GatherMetrics() returns")
 }

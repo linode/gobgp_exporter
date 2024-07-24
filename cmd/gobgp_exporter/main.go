@@ -11,10 +11,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
-	"github.com/go-kit/log/level"
 	exporter "github.com/greenpau/gobgp_exporter/pkg/gobgp_exporter"
-	"github.com/prometheus/common/promlog"
+	"github.com/sirupsen/logrus"
 )
 
 func loadCertificatePEM(filePath string) (*x509.Certificate, error) {
@@ -90,6 +91,22 @@ func loadKeyPEM(filePath string) (crypto.PrivateKey, error) {
 	return nil, errors.New("no private key PEM block found")
 }
 
+func getPackageRootPath() (string, error) {
+	_, filename, _, ok := runtime.Caller(1)
+	if !ok {
+		return "", fmt.Errorf("failed to get caller information")
+	}
+
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Dir(absPath), nil
+}
+
+var Logger = logrus.New()
+
 func main() {
 	var listenAddress string
 	var metricsPath string
@@ -135,18 +152,31 @@ func main() {
 		Timeout: pollTimeout,
 	}
 
-	allowedLogLevel := &promlog.AllowedLevel{}
-	if err := allowedLogLevel.Set(logLevel); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-		os.Exit(1)
+	rootPath, _ := getPackageRootPath()
+	if !strings.HasSuffix(rootPath, "/") {
+		rootPath += "/"
 	}
 
-	promlogConfig := &promlog.Config{
-		Level: allowedLogLevel,
+	Logger.SetReportCaller(true)
+	Logger.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05",
+		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
+			source := fmt.Sprintf(" source: %s:%d", filepath.Base(f.File), f.Line)
+			return "//", source
+		},
+	})
+
+	switch logLevel {
+	case "debug":
+		Logger.SetLevel(logrus.DebugLevel)
+	case "info":
+		Logger.SetLevel(logrus.InfoLevel)
+	default:
+		Logger.SetLevel(logrus.InfoLevel)
 	}
 
-	logger := promlog.New(promlogConfig)
-	opts.Logger = logger
+	opts.Logger = Logger
 
 	if serverTLS {
 		opts.TLS = new(tls.Config)
@@ -206,35 +236,21 @@ func main() {
 		os.Exit(0)
 	}
 
-	level.Info(logger).Log(
-		"msg", "Starting exporter",
-		"exporter", exporter.GetExporterName(),
-		"version", exporter.GetVersionInfo(),
-		"build_context", exporter.GetVersionBuildContext(),
-	)
+	Logger.Infof("Starting %s %s", exporter.GetExporterName(), exporter.GetVersionInfo())
 
 	e, err := exporter.NewExporter(opts)
 	if err != nil {
-		level.Error(logger).Log(
-			"msg", "failed to init properly",
-			"error", err.Error(),
-		)
+		Logger.Errorf("msg: %s. error: %s", "failed to init properly", err.Error())
 		os.Exit(1)
 	}
 
 	e.SetPollInterval(int64(pollInterval))
 	if err := e.AddAuthenticationToken(authToken); err != nil {
-		level.Error(logger).Log(
-			"msg", "failed to add authentication token",
-			"error", err.Error(),
-		)
+		Logger.Errorf("msg: %s. error: %s", "failed to add authentication token", err.Error())
 		os.Exit(1)
 	}
 
-	level.Info(logger).Log(
-		"msg", "exporter configuration",
-		"min_scrape_interval", e.GetPollInterval(),
-	)
+	Logger.Infof("msg %s. min_scrape_interval: %d", "exporter configuration", e.GetPollInterval())
 
 	http.HandleFunc(metricsPath, func(w http.ResponseWriter, r *http.Request) {
 		e.Scrape(w, r)
@@ -244,13 +260,10 @@ func main() {
 		e.Summary(metricsPath, w, r)
 	})
 
-	level.Info(logger).Log("listen_on ", listenAddress)
+	Logger.Infof("listen_on: %s", listenAddress)
 
 	if err := http.ListenAndServe(listenAddress, nil); err != nil {
-		level.Error(logger).Log(
-			"msg", "listener failed",
-			"error", err.Error(),
-		)
+		Logger.Errorf("msg: %s. error: %s", "listener failed", err.Error())
 		os.Exit(1)
 	}
 }
