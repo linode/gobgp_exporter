@@ -17,7 +17,6 @@ package exporter
 import (
 	"strings"
 
-	"github.com/go-kit/log/level"
 	gobgpapi "github.com/osrg/gobgp/v3/api"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/net/context"
@@ -101,10 +100,7 @@ func (n *RouterNode) GetRibCounters() {
 			//tableType = gobgpapi.TableType_VRF
 			continue
 		default:
-			level.Warn(n.logger).Log(
-				"msg", "Unsupported GoBGP route table type",
-				"table_type", tableTypeName,
-			)
+			n.logger.Warnf("msg: Unsupported GoBGP route table type. table_type: %s", tableTypeName)
 			continue
 		}
 
@@ -116,31 +112,17 @@ func (n *RouterNode) GetRibCounters() {
 			})
 
 			if err != nil {
-				level.Error(n.logger).Log(
-					"msg", "failed GoBGP query for route table",
-					"table_type", tableTypeName,
-					"address_family", addressFamilyName,
-					"error", err.Error(),
-				)
+				n.logger.Errorf("msg: failed GoBGP query for route table. table_type: %s. address_family: %s. error: %s", tableTypeName, addressFamilyName, err.Error())
 				n.IncrementErrorCounter()
 				continue
 			}
 
 			if serverResponse == nil {
-				level.Warn(n.logger).Log(
-					"msg", "GoBGP route table response is empty",
-					"table_type", tableTypeName,
-					"address_family", addressFamilyName,
-				)
+				n.logger.Warnf("msg: GoBGP route table response is empty. table_type: %s. address_family: %s", tableTypeName, addressFamilyName)
 				continue
 			}
 
-			level.Debug(n.logger).Log(
-				"msg", "GoBGP route table response",
-				"table_type", tableTypeName,
-				"address_family", addressFamilyName,
-				"response", serverResponse,
-			)
+			n.logger.Debugf("msg: GoBGP route table response. table_type: %s. address_family: %s. response: %s", tableTypeName, addressFamilyName, serverResponse)
 
 			n.metrics = append(n.metrics, prometheus.MustNewConstMetric(
 				routerRibTotalDestinationCount,
