@@ -5,3 +5,4 @@
 *.tar.gz
 vendor/**
 .coverage/
+main
