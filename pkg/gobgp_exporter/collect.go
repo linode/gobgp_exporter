@@ -15,6 +15,7 @@
 package exporter
 
 import (
+	"os"
 	"sync"
 	"time"
 
@@ -78,7 +79,14 @@ func (n *RouterNode) GatherMetrics() {
 		prometheus.GaugeValue,
 		float64(upValue),
 	))
-
+	if hostname, err := os.Hostname(); err == nil {
+		n.metrics = append(n.metrics, prometheus.MustNewConstMetric(
+			routerHostname,
+			prometheus.GaugeValue,
+			1,
+			hostname,
+		))
+	}
 	n.metrics = append(n.metrics, prometheus.MustNewConstMetric(
 		routerErrors,
 		prometheus.CounterValue,

@@ -23,6 +23,7 @@ import (
 func (n *RouterNode) Describe(ch chan<- *prometheus.Desc) {
 	ch <- routerUp
 	ch <- routerID
+	ch <- routerHostname
 	ch <- routerLocalAS
 	ch <- routerErrors
 	ch <- routerNextScrape

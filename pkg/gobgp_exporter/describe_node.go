@@ -24,6 +24,11 @@ var (
 		"Is GoBGP up and responds to queries (1) or is it down (0).",
 		nil, nil,
 	)
+	routerHostname = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "router", "hostname_info"),
+		"The hostname on which gobgp is running reported by OS kernel.",
+		[]string{"hostname"}, nil,
+	)
 	routerID = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "router", "id"),
 		"What is GoBGP router ID.",
