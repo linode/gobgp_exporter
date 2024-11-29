@@ -1,11 +1,8 @@
 package main
 
 import (
-	"crypto"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -16,110 +13,11 @@ import (
 	"strings"
 
 	exporter "github.com/greenpau/gobgp_exporter/pkg/gobgp_exporter"
+	tlsutil "github.com/greenpau/gobgp_exporter/pkg/tlsutil"
 	"github.com/sirupsen/logrus"
 )
 
-func loadCertificatePEM(filePath string) (*x509.Certificate, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	rest := content
-	var block *pem.Block
-	var cert *x509.Certificate
-	for len(rest) > 0 {
-		block, rest = pem.Decode(content)
-		if block == nil {
-			// no PEM data found, rest will not have been modified
-			break
-		}
-		content = rest
-		switch block.Type {
-		case "CERTIFICATE":
-			cert, err = x509.ParseCertificate(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			return cert, err
-		default:
-			// not the PEM block we're looking for
-			continue
-		}
-	}
-	return nil, errors.New("no certificate PEM block found")
-}
-
-func loadKeyPEM(filePath string) (crypto.PrivateKey, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	rest := content
-	var block *pem.Block
-	var key crypto.PrivateKey
-	for len(rest) > 0 {
-		block, rest = pem.Decode(content)
-		if block == nil {
-			// no PEM data found, rest will not have been modified
-			break
-		}
-		switch block.Type {
-		case "RSA PRIVATE KEY":
-			key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			return key, err
-		case "PRIVATE KEY":
-			key, err = x509.ParsePKCS8PrivateKey(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			return key, err
-		case "EC PRIVATE KEY":
-			key, err = x509.ParseECPrivateKey(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			return key, err
-		default:
-			// not the PEM block we're looking for
-			continue
-		}
-	}
-	return nil, errors.New("no private key PEM block found")
-}
-
-func getPackageRootPath() (string, error) {
-	_, filename, _, ok := runtime.Caller(1)
-	if !ok {
-		return "", fmt.Errorf("failed to get caller information")
-	}
-
-	absPath, err := filepath.Abs(filename)
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Dir(absPath), nil
-}
-
 var logger = logrus.New()
-
-func getmTLSConfig(caChain string) (*tls.Config, error) {
-	caCert, err := os.ReadFile(caChain)
-	if err != nil {
-		return nil, fmt.Errorf("Error reading server certificate: %s", err)
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-	return &tls.Config{
-		ClientCAs:  caCertPool,
-		ClientAuth: tls.RequireAndVerifyClientCert,
-	}, nil
-}
 
 func main() {
 	var listenAddress string
@@ -178,7 +76,7 @@ func main() {
 		Timeout: pollTimeout,
 	}
 
-	rootPath, _ := getPackageRootPath()
+	rootPath, _ := tlsutil.GetPackageRootPath()
 	if !strings.HasSuffix(rootPath, "/") {
 		rootPath += "/"
 	}
@@ -226,11 +124,11 @@ func main() {
 		}
 		if len(serverTLSClientCertPath) > 0 && len(serverTLSClientKeyPath) > 0 {
 			// again assuming PEM file
-			cert, err := loadCertificatePEM(serverTLSClientCertPath)
+			cert, err := tlsutil.LoadCertificatePEM(serverTLSClientCertPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to load client certificate: %s\n", err)
 			}
-			key, err := loadKeyPEM(serverTLSClientKeyPath)
+			key, err := tlsutil.LoadKeyPEM(serverTLSClientKeyPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to load client key: %s\n", err)
 			}
@@ -291,7 +189,7 @@ func main() {
 	if webServerTLS {
 		server := &http.Server{
 			Addr:      listenAddress,
-			TLSConfig: Must(getmTLSConfig(webServerTLSCAPath)),
+			TLSConfig: Must(tlsutil.GetmTLSConfig(webServerTLSCAPath)),
 		}
 		err = server.ListenAndServeTLS(webServerTLSServerCertPath, webServerTLSServerKeyPath)
 	} else {
