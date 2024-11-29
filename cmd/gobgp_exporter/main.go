@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
@@ -8,9 +9,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
+	"time"
 
 	exporter "github.com/greenpau/gobgp_exporter/pkg/gobgp_exporter"
 	tlsutil "github.com/greenpau/gobgp_exporter/pkg/tlsutil"
@@ -75,6 +79,9 @@ func main() {
 		Address: serverAddress,
 		Timeout: pollTimeout,
 	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
 	rootPath, _ := tlsutil.GetPackageRootPath()
 	if !strings.HasSuffix(rootPath, "/") {
@@ -177,6 +184,7 @@ func main() {
 	logger.Infof("msg %s. min_scrape_interval: %d", "exporter configuration", e.GetPollInterval())
 
 	http.HandleFunc(metricsPath, func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(10 * time.Second)
 		e.Scrape(w, r)
 	})
 
@@ -184,21 +192,89 @@ func main() {
 		e.Summary(metricsPath, w, r)
 	})
 
-	logger.Infof("listen_on: %s", listenAddress)
+	var server *http.Server
 
 	if webServerTLS {
-		server := &http.Server{
-			Addr:      listenAddress,
-			TLSConfig: Must(tlsutil.GetmTLSConfig(webServerTLSCAPath)),
+		tlsReloader, err := tlsutil.NewTLSReloader(webServerTLSServerCertPath, webServerTLSServerKeyPath, webServerTLSCAPath)
+		if err != nil {
+			logger.Fatalf("Failed to load TLS certificates: %v", err)
 		}
-		err = server.ListenAndServeTLS(webServerTLSServerCertPath, webServerTLSServerKeyPath)
+
+		tlsConfig := &tls.Config{
+			GetCertificate:     tlsReloader.GetCertificate,
+			GetConfigForClient: tlsReloader.GetConfigForClient,
+		}
+
+		server = &http.Server{
+			Addr:      listenAddress,
+			TLSConfig: tlsConfig,
+			Handler:   nil,
+		}
+
+		// go routine with https server start
+		go func() {
+			logger.Infof("Starting HTTPS server on %s", listenAddress)
+			if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				logger.Fatalf("Server failed: %v", err)
+			}
+		}()
+
+		// handle SIGHUP for certificate reloading
+		go func() {
+			for {
+				sig := <-sigCh
+				if sig == syscall.SIGHUP {
+					logger.Info("Received SIGHUP, reloading certificates")
+					if err := tlsReloader.Reload(); err != nil {
+						logger.Infof("Failed to reload certificates: %v", err)
+					} else {
+						logger.Info("Certificates reloaded")
+					}
+				} else if sig == syscall.SIGINT || sig == syscall.SIGTERM {
+					logger.Info("Received shutdown signal, shutting down server...")
+					if err := server.Shutdown(context.Background()); err != nil {
+						logger.Fatalf("Server Shutdown failed: %v", err)
+					}
+					logger.Info("Server exited properly")
+					os.Exit(0)
+				}
+			}
+		}()
 	} else {
-		err = http.ListenAndServe(listenAddress, nil)
+		// non-tls server
+		server = &http.Server{
+			Addr:    listenAddress,
+			Handler: nil,
+		}
+
+		logger.Infof("webServerTLS is not set - starting normal HTTP on %s", listenAddress)
+
+		go func() {
+			logger.Infof("Starting HTTP server on %s", listenAddress)
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Fatalf("Server failed: %v", err)
+			}
+		}()
+
+		logger.Info("webServerTLS is not set - Handling signals")
+
+		// Handle signals
+		go func() {
+			for {
+				sig := <-sigCh
+				if sig == syscall.SIGINT || sig == syscall.SIGTERM {
+					logger.Info("Received shutdown signal, shutting down server...")
+					if err := server.Shutdown(context.Background()); err != nil {
+						logger.Fatalf("Server Shutdown failed: %v", err)
+					}
+					logger.Infof("Server exited properly")
+					os.Exit(0)
+				}
+			}
+		}()
 	}
 
-	if err != nil {
-		logger.WithFields(logrus.Fields{"msg": "listener failed", "error": err.Error()}).Fatal()
-	}
+	select {}
 }
 
 func Must[T any](required T, err error) T {
