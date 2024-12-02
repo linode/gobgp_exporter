@@ -19,18 +19,14 @@ type TLSReloader struct {
 	logger   *logrus.Logger
 }
 
-func NewTLSReloader(certPath, keyPath, caPath string, logger *logrus.Logger) (*TLSReloader, error) {
+func NewTLSReloader(certPath, keyPath, caPath string, logger *logrus.Logger) *TLSReloader {
 	reloader := &TLSReloader{
 		certPath: certPath,
 		keyPath:  keyPath,
 		caPath:   caPath,
 		logger:   logger,
 	}
-	// reload works for a first time load as well
-	if err := reloader.Reload(); err != nil {
-		return nil, err
-	}
-	return reloader, nil
+	return reloader
 }
 
 func (t *TLSReloader) Reload() error {
@@ -56,7 +52,7 @@ func (t *TLSReloader) Reload() error {
 	return nil
 }
 
-func (t *TLSReloader) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (t *TLSReloader) GetCertificate(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	t.mu.RLock()
 	cert := t.cert
 	t.mu.RUnlock()

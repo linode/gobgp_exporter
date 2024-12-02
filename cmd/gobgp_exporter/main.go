@@ -194,9 +194,11 @@ func main() {
 
 	if webServerTLS {
 		// http server with mtls
-		tlsReloader, err := tlsutil.NewTLSReloader(webServerTLSServerCertPath, webServerTLSServerKeyPath, webServerTLSCAPath, logger)
+		tlsReloader := tlsutil.NewTLSReloader(webServerTLSServerCertPath, webServerTLSServerKeyPath, webServerTLSCAPath, logger)
+		// initial load of the TLS certs
+		err := tlsReloader.Reload()
 		if err != nil {
-			logger.Fatalf("Failed to load TLS certificates: %v", err)
+			logger.Fatalf("Failed to do an initial load of TLS certificates: %v", err)
 		}
 
 		tlsConfig := &tls.Config{
@@ -235,6 +237,7 @@ func main() {
 					// graceful shutdown for SIGINT or SIGTERM
 					logger.Info("Received shutdown signal, shutting down http server with mtls...")
 
+					// setting maximum time that the server waits for a connection to close for 10s
 					if serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
 						os.Exit(1)
 					} else {
@@ -265,6 +268,7 @@ func main() {
 				if sig == syscall.SIGINT || sig == syscall.SIGTERM {
 					logger.Info("Received shutdown signal, shutting down http server with no mtls...")
 
+					// setting maximum time that the server waits for a connection to close for 10s
 					if serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
 						os.Exit(1)
 					} else {
