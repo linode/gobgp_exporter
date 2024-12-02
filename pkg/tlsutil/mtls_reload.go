@@ -3,9 +3,10 @@ package tlsutil
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"os"
 	"sync"
+
+	"github.com/sirupsen/logrus"
 )
 
 type TLSReloader struct {
@@ -15,13 +16,15 @@ type TLSReloader struct {
 	certPath string
 	keyPath  string
 	caPath   string
+	logger   *logrus.Logger
 }
 
-func NewTLSReloader(certPath, keyPath, caPath string) (*TLSReloader, error) {
+func NewTLSReloader(certPath, keyPath, caPath string, logger *logrus.Logger) (*TLSReloader, error) {
 	reloader := &TLSReloader{
 		certPath: certPath,
 		keyPath:  keyPath,
 		caPath:   caPath,
+		logger:   logger,
 	}
 	// reload works for a first time load as well
 	if err := reloader.Reload(); err != nil {
@@ -33,15 +36,18 @@ func NewTLSReloader(certPath, keyPath, caPath string) (*TLSReloader, error) {
 func (t *TLSReloader) Reload() error {
 	cert, err := tls.LoadX509KeyPair(t.certPath, t.keyPath)
 	if err != nil {
-		return fmt.Errorf("failed to load server key pair: %v", err)
+		t.logger.Errorf("failed to load server key pair: %v", err)
+		return err
 	}
 	caCertPool := x509.NewCertPool()
 	caCertPEM, err := os.ReadFile(t.caPath)
 	if err != nil {
-		return fmt.Errorf("failed to read client CA cert: %v", err)
+		t.logger.Errorf("failed to read client CA cert: %v", err)
+		return err
 	}
 	if ok := caCertPool.AppendCertsFromPEM(caCertPEM); !ok {
-		return fmt.Errorf("failed to parse client CA cert")
+		t.logger.Errorf("failed to parse client CA cert: %v", err)
+		return err
 	}
 	t.mu.Lock()
 	t.cert = &cert

@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -184,7 +183,6 @@ func main() {
 	logger.Infof("msg %s. min_scrape_interval: %d", "exporter configuration", e.GetPollInterval())
 
 	http.HandleFunc(metricsPath, func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(10 * time.Second)
 		e.Scrape(w, r)
 	})
 
@@ -195,7 +193,8 @@ func main() {
 	var server *http.Server
 
 	if webServerTLS {
-		tlsReloader, err := tlsutil.NewTLSReloader(webServerTLSServerCertPath, webServerTLSServerKeyPath, webServerTLSCAPath)
+		// http server with mtls
+		tlsReloader, err := tlsutil.NewTLSReloader(webServerTLSServerCertPath, webServerTLSServerKeyPath, webServerTLSCAPath, logger)
 		if err != nil {
 			logger.Fatalf("Failed to load TLS certificates: %v", err)
 		}
@@ -213,17 +212,19 @@ func main() {
 
 		// go routine with https server start
 		go func() {
-			logger.Infof("Starting HTTPS server on %s", listenAddress)
+			logger.Infof("mTLS is set - Starting HTTPS server on %s", listenAddress)
 			if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 				logger.Fatalf("Server failed: %v", err)
 			}
 		}()
 
+		logger.Info("mTLS is set - preparing to handle SIGHUP, SIGINT or SIGTERM")
 		// handle SIGHUP for certificate reloading
 		go func() {
 			for {
 				sig := <-sigCh
 				if sig == syscall.SIGHUP {
+					// reload certs for SIGHUP
 					logger.Info("Received SIGHUP, reloading certificates")
 					if err := tlsReloader.Reload(); err != nil {
 						logger.Infof("Failed to reload certificates: %v", err)
@@ -231,12 +232,14 @@ func main() {
 						logger.Info("Certificates reloaded")
 					}
 				} else if sig == syscall.SIGINT || sig == syscall.SIGTERM {
-					logger.Info("Received shutdown signal, shutting down server...")
-					if err := server.Shutdown(context.Background()); err != nil {
-						logger.Fatalf("Server Shutdown failed: %v", err)
+					// graceful shutdown for SIGINT or SIGTERM
+					logger.Info("Received shutdown signal, shutting down http server with mtls...")
+
+					if serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
+						os.Exit(1)
+					} else {
+						os.Exit(0)
 					}
-					logger.Info("Server exited properly")
-					os.Exit(0)
 				}
 			}
 		}()
@@ -247,28 +250,26 @@ func main() {
 			Handler: nil,
 		}
 
-		logger.Infof("webServerTLS is not set - starting normal HTTP on %s", listenAddress)
-
 		go func() {
-			logger.Infof("Starting HTTP server on %s", listenAddress)
+			logger.Infof("mTLS is not set - Starting HTTP server on %s", listenAddress)
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Fatalf("Server failed: %v", err)
 			}
 		}()
 
-		logger.Info("webServerTLS is not set - Handling signals")
-
+		logger.Info("mTLS is not set - preparing to handle SIGINT or SIGTERM")
 		// Handle signals
 		go func() {
 			for {
 				sig := <-sigCh
 				if sig == syscall.SIGINT || sig == syscall.SIGTERM {
-					logger.Info("Received shutdown signal, shutting down server...")
-					if err := server.Shutdown(context.Background()); err != nil {
-						logger.Fatalf("Server Shutdown failed: %v", err)
+					logger.Info("Received shutdown signal, shutting down http server with no mtls...")
+
+					if serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
+						os.Exit(1)
+					} else {
+						os.Exit(0)
 					}
-					logger.Infof("Server exited properly")
-					os.Exit(0)
 				}
 			}
 		}()
@@ -277,9 +278,15 @@ func main() {
 	select {}
 }
 
-func Must[T any](required T, err error) T {
-	if err != nil {
-		log.Fatal(err)
+func serverShutdownWithTimeout(server *http.Server, ctx context.Context, duration time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Fatalf("Server shutdown with timeout failed to have a clean exit: %v", err)
+		return err
+	} else {
+		logger.Info("Server shutdown with timeout exited properly")
+		return err
 	}
-	return required
 }
