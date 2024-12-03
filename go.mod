@@ -1,6 +1,6 @@
 module github.com/greenpau/gobgp_exporter
 
-go 1.19
+go 1.23.1
 
 require (
 	github.com/osrg/gobgp/v3 v3.27.1-0.20240607131100-7d2d020bd226
