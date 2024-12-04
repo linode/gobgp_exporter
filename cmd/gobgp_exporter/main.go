@@ -238,7 +238,7 @@ func main() {
 					logger.Info("Received shutdown signal, shutting down http server with mtls...")
 
 					// setting maximum time that the server waits for a connection to close for 10s
-					if serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
+					if err := serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
 						os.Exit(1)
 					} else {
 						os.Exit(0)
@@ -269,7 +269,7 @@ func main() {
 					logger.Info("Received shutdown signal, shutting down http server with no mtls...")
 
 					// setting maximum time that the server waits for a connection to close for 10s
-					if serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
+					if err := serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
 						os.Exit(1)
 					} else {
 						os.Exit(0)
