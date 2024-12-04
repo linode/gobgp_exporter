@@ -47,12 +47,6 @@ func (n *RouterNode) GetPeers() {
 		peers = append(peers, r.Peer)
 	}
 
-	if err != nil {
-		n.logger.Errorf("msg: GoBGP query for peers failed. error: %s", err.Error())
-		n.IncrementErrorCounter()
-		return
-	}
-
 	n.metrics = append(n.metrics, prometheus.MustNewConstMetric(
 		routerPeers,
 		prometheus.GaugeValue,

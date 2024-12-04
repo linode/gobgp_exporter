@@ -1,125 +1,25 @@
 package main
 
 import (
-	"crypto"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
-	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
+	"syscall"
+	"time"
 
 	exporter "github.com/greenpau/gobgp_exporter/pkg/gobgp_exporter"
+	tlsutil "github.com/greenpau/gobgp_exporter/pkg/tlsutil"
 	"github.com/sirupsen/logrus"
 )
 
-func loadCertificatePEM(filePath string) (*x509.Certificate, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	rest := content
-	var block *pem.Block
-	var cert *x509.Certificate
-	for len(rest) > 0 {
-		block, rest = pem.Decode(content)
-		if block == nil {
-			// no PEM data found, rest will not have been modified
-			break
-		}
-		content = rest
-		switch block.Type {
-		case "CERTIFICATE":
-			cert, err = x509.ParseCertificate(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			return cert, err
-		default:
-			// not the PEM block we're looking for
-			continue
-		}
-	}
-	return nil, errors.New("no certificate PEM block found")
-}
-
-func loadKeyPEM(filePath string) (crypto.PrivateKey, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	rest := content
-	var block *pem.Block
-	var key crypto.PrivateKey
-	for len(rest) > 0 {
-		block, rest = pem.Decode(content)
-		if block == nil {
-			// no PEM data found, rest will not have been modified
-			break
-		}
-		switch block.Type {
-		case "RSA PRIVATE KEY":
-			key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			return key, err
-		case "PRIVATE KEY":
-			key, err = x509.ParsePKCS8PrivateKey(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			return key, err
-		case "EC PRIVATE KEY":
-			key, err = x509.ParseECPrivateKey(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			return key, err
-		default:
-			// not the PEM block we're looking for
-			continue
-		}
-	}
-	return nil, errors.New("no private key PEM block found")
-}
-
-func getPackageRootPath() (string, error) {
-	_, filename, _, ok := runtime.Caller(1)
-	if !ok {
-		return "", fmt.Errorf("failed to get caller information")
-	}
-
-	absPath, err := filepath.Abs(filename)
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Dir(absPath), nil
-}
-
 var logger = logrus.New()
-
-func getmTLSConfig(caChain string) (*tls.Config, error) {
-	caCert, err := os.ReadFile(caChain)
-	if err != nil {
-		return nil, fmt.Errorf("Error reading server certificate: %s", err)
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-	return &tls.Config{
-		ClientCAs:  caCertPool,
-		ClientAuth: tls.RequireAndVerifyClientCert,
-	}, nil
-}
 
 func main() {
 	var listenAddress string
@@ -178,10 +78,8 @@ func main() {
 		Timeout: pollTimeout,
 	}
 
-	rootPath, _ := getPackageRootPath()
-	if !strings.HasSuffix(rootPath, "/") {
-		rootPath += "/"
-	}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
 	logger.SetReportCaller(true)
 	logger.SetFormatter(&logrus.TextFormatter{
@@ -226,11 +124,11 @@ func main() {
 		}
 		if len(serverTLSClientCertPath) > 0 && len(serverTLSClientKeyPath) > 0 {
 			// again assuming PEM file
-			cert, err := loadCertificatePEM(serverTLSClientCertPath)
+			cert, err := tlsutil.LoadCertificatePEM(serverTLSClientCertPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to load client certificate: %s\n", err)
 			}
-			key, err := loadKeyPEM(serverTLSClientKeyPath)
+			key, err := tlsutil.LoadKeyPEM(serverTLSClientKeyPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to load client key: %s\n", err)
 			}
@@ -286,26 +184,107 @@ func main() {
 		e.Summary(metricsPath, w, r)
 	})
 
-	logger.Infof("listen_on: %s", listenAddress)
+	var server *http.Server
 
 	if webServerTLS {
-		server := &http.Server{
-			Addr:      listenAddress,
-			TLSConfig: Must(getmTLSConfig(webServerTLSCAPath)),
+		// http server with mtls
+		tlsReloader := tlsutil.NewTLSReloader(webServerTLSServerCertPath, webServerTLSServerKeyPath, webServerTLSCAPath, logger)
+		// initial load of the TLS certs
+		err := tlsReloader.Reload()
+		if err != nil {
+			logger.Fatalf("Failed to do an initial load of TLS certificates: %v", err)
 		}
-		err = server.ListenAndServeTLS(webServerTLSServerCertPath, webServerTLSServerKeyPath)
+
+		tlsConfig := &tls.Config{
+			GetCertificate:     tlsReloader.GetCertificate,
+			GetConfigForClient: tlsReloader.GetConfigForClient,
+		}
+
+		server = &http.Server{
+			Addr:      listenAddress,
+			TLSConfig: tlsConfig,
+			Handler:   nil,
+		}
+
+		// go routine with https server start
+		go func() {
+			logger.Infof("mTLS is set - Starting HTTPS server on %s", listenAddress)
+			if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				logger.Fatalf("Server failed: %v", err)
+			}
+		}()
+
+		logger.Info("mTLS is set - preparing to handle SIGHUP, SIGINT or SIGTERM")
+		// handle SIGHUP for certificate reloading
+		go func() {
+			for {
+				sig := <-sigCh
+				if sig == syscall.SIGHUP {
+					// reload certs for SIGHUP
+					logger.Info("Received SIGHUP, reloading certificates")
+					if err := tlsReloader.Reload(); err != nil {
+						logger.Infof("Failed to reload certificates: %v", err)
+					} else {
+						logger.Info("Certificates reloaded")
+					}
+				} else if sig == syscall.SIGINT || sig == syscall.SIGTERM {
+					// graceful shutdown for SIGINT or SIGTERM
+					logger.Info("Received shutdown signal, shutting down http server with mtls...")
+
+					// setting maximum time that the server waits for a connection to close for 10s
+					if err := serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
+						os.Exit(1)
+					} else {
+						os.Exit(0)
+					}
+				}
+			}
+		}()
 	} else {
-		err = http.ListenAndServe(listenAddress, nil)
+		// non-tls server
+		server = &http.Server{
+			Addr:    listenAddress,
+			Handler: nil,
+		}
+
+		go func() {
+			logger.Infof("mTLS is not set - Starting HTTP server on %s", listenAddress)
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Fatalf("Server failed: %v", err)
+			}
+		}()
+
+		logger.Info("mTLS is not set - preparing to handle SIGINT or SIGTERM")
+		// Handle signals
+		go func() {
+			for {
+				sig := <-sigCh
+				if sig == syscall.SIGINT || sig == syscall.SIGTERM {
+					logger.Info("Received shutdown signal, shutting down http server with no mtls...")
+
+					// setting maximum time that the server waits for a connection to close for 10s
+					if err := serverShutdownWithTimeout(server, context.Background(), time.Second*10); err != nil {
+						os.Exit(1)
+					} else {
+						os.Exit(0)
+					}
+				}
+			}
+		}()
 	}
 
-	if err != nil {
-		logger.WithFields(logrus.Fields{"msg": "listener failed", "error": err.Error()}).Fatal()
-	}
+	select {}
 }
 
-func Must[T any](required T, err error) T {
-	if err != nil {
-		log.Fatal(err)
+func serverShutdownWithTimeout(server *http.Server, ctx context.Context, duration time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Fatalf("Server shutdown with timeout failed to have a clean exit: %v", err)
+		return err
+	} else {
+		logger.Info("Server shutdown with timeout exited properly")
+		return err
 	}
-	return required
 }
