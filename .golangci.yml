@@ -1,0 +1,23 @@
+linters:
+  # We disable all linters and then explicitly enable only these that we want,
+  # regardless of whether the set of wanted linters matches the current default.
+  disable-all: true
+  enable:
+    - gosimple
+    - govet
+    - ineffassign
+    - typecheck
+    - unused
+    - errcheck
+    - gofmt
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
+      linters:
+        - errcheck
+
+linters-settings:
+  gofmt:
+    simplify: false # don't run gofmt with `-s` option since VSCode doesn't do that by default
