@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -81,11 +80,6 @@ func main() {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-
-	rootPath, _ := tlsutil.GetPackageRootPath()
-	if !strings.HasSuffix(rootPath, "/") {
-		rootPath += "/"
-	}
 
 	logger.SetReportCaller(true)
 	logger.SetFormatter(&logrus.TextFormatter{

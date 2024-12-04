@@ -5,10 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
 )
 
 func LoadCertificatePEM(filePath string) (*x509.Certificate, error) {
@@ -82,18 +79,4 @@ func LoadKeyPEM(filePath string) (crypto.PrivateKey, error) {
 		}
 	}
 	return nil, errors.New("no private key PEM block found")
-}
-
-func GetPackageRootPath() (string, error) {
-	_, filename, _, ok := runtime.Caller(1)
-	if !ok {
-		return "", fmt.Errorf("failed to get caller information")
-	}
-
-	absPath, err := filepath.Abs(filename)
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Dir(absPath), nil
 }
